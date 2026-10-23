@@ -103,6 +103,16 @@ button{cursor:pointer}
 
 /* editor sheet */
 .scrim{position:fixed;inset:0;background:rgba(10,16,22,.28);z-index:20}
+.scrim.clear{background:transparent}
+.thick{position:absolute;top:12px;left:12px;display:flex;gap:4px;align-items:center;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:4px 6px 4px 10px;box-shadow:0 2px 8px rgba(0,0,0,.08)}
+.thick .lab{margin-right:4px}
+.wbtn{border:1px solid transparent;background:none;border-radius:7px;width:46px;height:36px;display:grid;place-items:center;color:var(--st-new)}
+.wbtn svg{width:30px;height:20px}
+.wbtn[aria-pressed="true"]{border-color:var(--ink);background:var(--panel-2)}
+.wsel{display:flex;gap:6px;flex-wrap:wrap}
+.wsel .wbtn{border:1px solid var(--line);background:var(--panel-2);width:auto;padding:0 10px;height:40px;display:flex;gap:6px;font-size:12.5px;color:var(--ink)}
+.wsel .wbtn svg{color:var(--st-new)}
+.wsel .wbtn[aria-pressed="true"]{border-color:var(--ink);background:var(--panel)}
 .sheet{position:fixed;z-index:21;top:0;right:0;bottom:0;width:min(400px,100%);background:var(--panel);border-left:1px solid var(--line);display:flex;flex-direction:column;box-shadow:-8px 0 30px rgba(0,0,0,.12);padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
 .sheet-h{display:flex;align-items:center;gap:10px;padding:14px 16px;padding-right:max(16px,env(safe-area-inset-right,0px));border-bottom:1px solid var(--line)}
 .sheet-h h3{margin:0;font-size:16px;flex:1}
@@ -205,6 +215,7 @@ textarea.in{height:68px;padding:9px 11px;resize:vertical}
     </div>
     <div class="loading" id="loading">도면을 불러오는 중…</div>
     <div class="banner" id="exBanner" hidden><span>예시 표기 3건이 들어 있습니다.</span><button id="clearEx">예시 지우기</button></div>
+    <div class="thick" id="thickBar" hidden aria-label="균열선 두께"><span class="lab">선 두께</span></div>
     <div class="hud">
       <span class="pill" id="hintPill">S펜으로 그리면 손상이 추가되고, 손가락으로 끌거나 벌리면 도면이 움직입니다.</span>
       <span class="pill num" id="zoomPill">100%</span>
@@ -457,11 +468,15 @@ function drawMarks(){
   const g = els.gMarks; g.innerHTML = '';
   if (!proj) return;
   const k = 1 / view.s;
-  for (const m of pageMarks()) {
+  let list = pageMarks();
+  if (editing && editing.d.page === pageNo) {
+    list = editing.isNew ? [...list, editing.d] : list.map(x => x.id === editing.d.id ? editing.d : x);
+  }
+  for (const m of list) {
     const col = STATUS[m.status]?.css || STATUS.new.css;
     const sel = m.id === selectedId;
     const grp = svgEl('g', {style:`color:${col}`}, g);
-    const sw = sel ? 4 : 2.4;
+    const sw = m.kind === 'line' ? (m.sw || 2.4) + (sel ? 1 : 0) : (sel ? 4 : 2.4);
     if (m.kind === 'line') {
       const pts = m.pts.map(p => p.join(',')).join(' ');
       if (sel) svgEl('polyline', {points:pts, fill:'none', stroke:'#fff', 'stroke-width':sw + 4, 'vector-effect':'non-scaling-stroke', 'stroke-linecap':'round', 'stroke-linejoin':'round', opacity:.9}, grp);
@@ -551,12 +566,29 @@ function nextNo(){
   return Math.max(pageInfo[pageNo]?.guess || 0, maxMine) + 1;
 }
 let lastMember = '', lastAreaType = '재료분리';
+const WIDTHS = [{v:1.5, label:'가늘게'}, {v:2.5, label:'보통'}, {v:4, label:'굵게'}, {v:6.5, label:'아주 굵게'}];
+let lineW = 2.5;
+try { const sv = parseFloat(localStorage.getItem('fd-lineW')); if (WIDTHS.some(w => w.v === sv)) lineW = sv; } catch (e) {}
+const wIcon = v => `<svg viewBox="0 0 30 20"><path d="M3 15 C 9 4, 15 16, 27 5" fill="none" stroke="currentColor" stroke-width="${v}" stroke-linecap="round"/></svg>`;
+function buildThickBar(){
+  const bar = $('#thickBar'); bar.querySelectorAll('.wbtn').forEach(b => b.remove());
+  for (const w of WIDTHS) {
+    const b = document.createElement('button'); b.className = 'wbtn'; b.title = w.label; b.setAttribute('aria-label', w.label);
+    b.setAttribute('aria-pressed', w.v === lineW); b.innerHTML = wIcon(w.v);
+    b.onclick = () => setLineW(w.v); bar.appendChild(b);
+  }
+}
+function setLineW(v){
+  lineW = v; try { localStorage.setItem('fd-lineW', v); } catch (e) {}
+  buildThickBar();
+  if (editing && editing.d.kind === 'line') { editing.d.sw = v; const ws = $('#edWidth'); if (ws) ws.querySelectorAll('.wbtn').forEach(b => b.setAttribute('aria-pressed', +b.dataset.w === v)); drawMarks(); }
+}
 
 function newMark(kind, pts){
   const type = kind === 'line' ? '균열' : kind === 'rect' ? lastAreaType : '';
   return {id:uid(), page:pageNo, kind, pts, status: kind === 'pin' ? 'chg' : 'new',
     no: kind === 'pin' ? '' : String(nextNo()), member:lastMember, type, crackW:'', w:'', l:'', n:'1',
-    unit: defaultUnit(type || '재료분리'), qty:0, memo:'', photos:[], t:Date.now()};
+    unit: defaultUnit(type || '재료분리'), qty:0, memo:'', photos:[], t:Date.now(), ...(kind === 'line' ? {sw:lineW} : {})};
 }
 
 /* ---------- hit test ---------- */
@@ -596,12 +628,13 @@ function setTool(t){
   tool = t;
   document.querySelectorAll('.tool[data-tool]').forEach(b => b.setAttribute('aria-pressed', b.dataset.tool === t ? 'true' : 'false'));
   els.view.className = 'view t-' + t;
+  $('#thickBar').hidden = t !== 'line';
   if (t === 'ref') toast('도면에서 CAD 좌표를 알고 있는 점(기둥 중심, 도곽 모서리 등)을 찍으세요', 3500);
 }
 function drawDraft(){
   const g = els.gDraft; g.innerHTML = ''; if (!draft) return;
   const grp = svgEl('g', {style:`color:${STATUS.new.css}`}, g);
-  if (draft.kind === 'line') svgEl('polyline', {points:draft.pts.map(p => p.join(',')).join(' '), fill:'none', stroke:'currentColor', 'stroke-width':2.4, 'vector-effect':'non-scaling-stroke', 'stroke-linecap':'round', 'stroke-linejoin':'round'}, grp);
+  if (draft.kind === 'line') svgEl('polyline', {points:draft.pts.map(p => p.join(',')).join(' '), fill:'none', stroke:'currentColor', 'stroke-width':lineW, 'vector-effect':'non-scaling-stroke', 'stroke-linecap':'round', 'stroke-linejoin':'round'}, grp);
   if (draft.kind === 'rect') {
     const x = Math.min(draft.p0.x, draft.p1.x), y = Math.min(draft.p0.y, draft.p1.y);
     svgEl('rect', {x, y, width:Math.abs(draft.p1.x - draft.p0.x), height:Math.abs(draft.p1.y - draft.p0.y), fill:'currentColor', 'fill-opacity':.2, stroke:'currentColor', 'stroke-width':2, 'stroke-dasharray':'5 3', 'vector-effect':'non-scaling-stroke'}, grp);
@@ -661,6 +694,7 @@ function gestureMove(){
 const v = els.view;
 v.addEventListener('pointerdown', e => {
   if (!proj) return;
+  if (e.target.closest('.thick, .banner, .pill')) return;   // toolbar on top of the drawing
   if (e.pointerType === 'touch') {
     if (penId !== null && !penTouch) return;              // palm while the pen is drawing
     if (penId !== null && penTouch) { cancelDraft(); penId = null; penTouch = false; }  // second finger: switch to move/zoom
@@ -757,8 +791,24 @@ function pageTransform(n){
 let editing = null;
 function openEditor(m, isNew){
   editing = {orig:m, isNew, d:JSON.parse(JSON.stringify(m)), addedPhotos:[], removedPhotos:[], armDel:false};
-  selectedId = m.id; if (!isNew) refresh(); else { drawMarks(); }
+  selectedId = m.id;
   renderEditor();
+  if (!isNew) refresh(); else drawMarks();
+  requestAnimationFrame(() => { if (editing) revealBesideSheet(editing.d); });
+}
+function revealBesideSheet(m){
+  const sheet = document.querySelector('.sheet'); if (!sheet) return;
+  const vr = els.view.getBoundingClientRect(), sr = sheet.getBoundingClientRect();
+  const xs = m.pts.map(p => p[0]), ys = m.pts.map(p => p[1]);
+  const x0 = Math.min(...xs), x1 = Math.max(...xs), y0 = Math.min(...ys), y1 = Math.max(...ys);
+  const side = sr.left > vr.left + 120;          // sheet on the right (tablet) or at the bottom (phone)
+  const area = side ? {l:vr.left, r:Math.min(vr.right, sr.left), t:vr.top, b:vr.bottom} : {l:vr.left, r:vr.right, t:vr.top, b:Math.min(vr.bottom, sr.top)};
+  const sx0 = vr.left + view.tx + x0 * view.s, sx1 = vr.left + view.tx + x1 * view.s;
+  const sy0 = vr.top + view.ty + y0 * view.s, sy1 = vr.top + view.ty + y1 * view.s;
+  const pad = 40;
+  if (sx0 >= area.l + pad && sx1 <= area.r - pad && sy0 >= area.t + pad && sy1 <= area.b - pad) return;
+  const cx = (area.l + area.r) / 2, cy = (area.t + area.b) / 2;
+  view.tx += cx - (sx0 + sx1) / 2; view.ty += cy - (sy0 + sy1) / 2; applyView();
 }
 function renderEditor(){
   const {d, isNew} = editing;
@@ -766,13 +816,14 @@ function renderEditor(){
   const root = $('#sheetRoot');
   const typeChips = TYPES.map(t => `<button class="chip" data-type="${esc(t)}" aria-pressed="${d.type === t}">${esc(t)}</button>`).join('');
   const custom = d.type && !TYPES.includes(d.type) ? d.type : '';
-  root.innerHTML = `<div class="scrim" id="edScrim"></div>
+  root.innerHTML = `<div class="scrim clear" id="edScrim"></div>
   <section class="sheet" role="dialog" aria-modal="true" aria-labelledby="edTitle">
     <div class="sheet-h"><h3 id="edTitle">${isNew ? (d.kind === 'pin' ? '기존 손상 확인' : '신규 손상') : '손상 수정'} <span class="num" style="color:var(--muted);font-size:13px;font-weight:500">· 도면 ${pad2(d.page)}</span></h3><button class="x" id="edClose" aria-label="닫기">×</button></div>
     <div class="sheet-b">
       <div class="fld"><span class="lab">상태</span>
         <div class="seg" id="edStatus">${ST_ORDER.map(s => `<button data-st="${s}" aria-pressed="${d.status === s}"><span class="dot" style="background:${STATUS[s].css}"></span>${STATUS[s].label}</button>`).join('')}</div>
       </div>
+      ${d.kind === 'line' ? `<div class="fld"><span class="lab">선 두께</span><div class="wsel" id="edWidth">${WIDTHS.map(w => `<button class="wbtn" data-w="${w.v}" aria-pressed="${(d.sw || 2.4) === w.v}">${wIcon(w.v)}${w.label}</button>`).join('')}</div></div>` : ''}
       <div class="grid2">
         <div class="fld"><label for="edNo">번호</label><input class="in num" id="edNo" inputmode="numeric" value="${esc(d.no)}" placeholder="${d.kind === 'pin' ? '기존 번호' : ''}"></div>
         <div class="fld"><label for="edMember">부재명</label><input class="in" id="edMember" list="memberList" value="${esc(d.member)}" placeholder="예: 조작대"></div>
@@ -807,7 +858,7 @@ function renderEditor(){
   const upd = () => { $('#edQty').textContent = `${calcQty(editing.d)} ${editing.d.unit}`; };
   $('#edClose').onclick = () => closeEditor(false);
   $('#edCancel').onclick = () => closeEditor(false);
-  $('#edScrim').onclick = () => closeEditor(false);
+  $('#edScrim').onclick = () => { if (editing && editing.isNew) toast('저장 또는 취소를 눌러 주세요'); else closeEditor(false); };
   $('#edSave').onclick = () => closeEditor(true);
   const del = $('#edDel'); if (del) del.onclick = () => {
     if (!editing.armDel) { editing.armDel = true; del.textContent = '한 번 더 누르면 삭제'; del.classList.add('arm'); return; }
@@ -815,7 +866,8 @@ function renderEditor(){
     editing.orig.photos.forEach(pid => dbDel('photos', pid));
     editing = null; $('#sheetRoot').innerHTML = ''; selectedId = null; saveProj(); refresh(); toast('삭제했습니다');
   };
-  $('#edStatus').onclick = e => { const b = e.target.closest('[data-st]'); if (!b) return; editing.d.status = b.dataset.st; $('#edStatus').querySelectorAll('button').forEach(x => x.setAttribute('aria-pressed', x === b)); };
+  $('#edStatus').onclick = e => { const b = e.target.closest('[data-st]'); if (!b) return; editing.d.status = b.dataset.st; $('#edStatus').querySelectorAll('button').forEach(x => x.setAttribute('aria-pressed', x === b)); drawMarks(); };
+  const wsel = $('#edWidth'); if (wsel) wsel.onclick = e => { const b = e.target.closest('[data-w]'); if (b) setLineW(+b.dataset.w); };
   $('#edTypes').onclick = e => {
     const b = e.target.closest('[data-type]'); if (!b) return;
     syncFields(); const wasCrack = isCrack(editing.d.type);
@@ -908,8 +960,9 @@ function buildDxf(){
   g(0, 'TABLE'); g(2, 'STYLE'); g(70, 1); g(0, 'STYLE'); g(2, 'KOR'); g(70, 0); g(40, 0); g(41, 1); g(50, 0); g(71, 0); g(42, 2.5); g(3, 'malgun.ttf'); g(4, ''); g(0, 'ENDTAB');
   g(0, 'ENDSEC');
   g(0, 'SECTION'); g(2, 'ENTITIES');
-  const poly = (layer, pts, closed) => {
+  const poly = (layer, pts, closed, width = 0) => {
     g(0, 'POLYLINE'); g(8, layer); g(66, 1); g(10, 0); g(20, 0); g(30, 0); g(70, closed ? 1 : 0);
+    if (width) { g(40, width); g(41, width); }
     for (const [x, y] of pts) { g(0, 'VERTEX'); g(8, layer); g(10, x); g(20, y); g(30, 0); }
     g(0, 'SEQEND'); g(8, layer);
   };
@@ -924,7 +977,7 @@ function buildDxf(){
     const h = 6 * T.k;
     for (const m of ms) {
       const layer = STATUS[m.status].layer;
-      if (m.kind === 'line') poly(layer, m.pts.map(p => T.f(p[0], p[1])), false);
+      if (m.kind === 'line') poly(layer, m.pts.map(p => T.f(p[0], p[1])), false, (m.sw || 2.4) * 0.4 * T.k);
       else if (m.kind === 'rect') { const [a, b] = m.pts; poly(layer, [T.f(a[0], a[1]), T.f(b[0], a[1]), T.f(b[0], b[1]), T.f(a[0], b[1])], true);
         if (m.status === 'fix') { poly(layer, [T.f(a[0], a[1]), T.f(b[0], b[1])], false); poly(layer, [T.f(b[0], a[1]), T.f(a[0], b[1])], false); } }
       else { const [x, y] = T.f(m.pts[0][0], m.pts[0][1]); g(0, 'CIRCLE'); g(8, layer); g(10, x); g(20, y); g(30, 0); g(40, 5 * T.k); }
@@ -1033,6 +1086,7 @@ $('#bakInput').onchange = async e => { const f = e.target.files[0]; e.target.val
 $('#clearEx').onclick = () => { pushUndo(); proj.marks = proj.marks.filter(m => !m.example); saveProj(); refresh(); toast('예시를 지웠습니다'); };
 document.addEventListener('visibilitychange', () => { if (document.hidden && proj) { clearTimeout(saveTimer); dbSet('kv', 'proj:' + proj.key, JSON.parse(JSON.stringify(proj))); } });
 if (window.matchMedia('(max-width:760px)').matches) { els.app.classList.add('noside'); $('#toggleSide').setAttribute('aria-pressed', 'false'); }
+buildThickBar();
 setTool('line');
 
 function showEmpty(){

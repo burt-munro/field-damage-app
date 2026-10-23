@@ -1,5 +1,5 @@
 // 앱을 고칠 때마다 VERSION 숫자를 올리면 태블릿이 새 파일을 받습니다.
-const VERSION = 'v1';
+const VERSION = 'v2';
 const CACHE = 'field-damage-' + VERSION;
 const ASSETS = ['./', 'index.html', 'manifest.webmanifest', 'vendor/pdf.min.js', 'vendor/pdf.worker.min.js',
   'vendor/jszip.min.js', 'icons/icon-192.png', 'icons/icon-512.png', 'icons/icon-maskable-512.png'];
